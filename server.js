@@ -20,7 +20,7 @@ const html = `<!DOCTYPE html>
   <h1>${message}</h1>
   <div class="badge">Version: ${version}</div>
   <div class="meta">
-    <p>KB ACE Academy — Cloud Native 입문 최종 평가!</p>
+    <p>KB ACE Academy — Cloud Native 입문 최종 평가 V2!</p>
     <p>End-to-End GitOps Pipeline (GitHub Actions → Docker Hub → Argo CD → EKS)</p>
   </div>
 </body>

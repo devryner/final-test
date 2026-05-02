@@ -1,0 +1,84 @@
+name: CI - Build, Push & Update Manifest
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: devryner/final-test
+  MANIFEST_REPO: devryner/final-test-manifest
+  MANIFEST_BRANCH: main
+
+jobs:
+  build-and-push:
+    name: Build & Push to Docker Hub
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag (commit SHA short)
+        id: meta
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            COMMIT_SHA=${{ steps.meta.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  update-manifest:
+    name: Update Manifest Repo
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manifest repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MANIFEST_REPO }}
+          ref: ${{ env.MANIFEST_BRANCH }}
+          token: ${{ secrets.GH_PAT }}
+          path: manifest
+
+      - name: Update image tag in deployment.yaml
+        working-directory: manifest
+        env:
+          NEW_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          sed -i -E "s|image: ${IMAGE_NAME}:.*|image: ${IMAGE_NAME}:${NEW_TAG}|g" deployment.yaml
+          echo "----- updated deployment.yaml -----"
+          cat deployment.yaml
+
+      - name: Commit & push manifest change
+        working-directory: manifest
+        env:
+          NEW_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment.yaml
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit."
+            exit 0
+          fi
+          git commit -m "deploy: bump image to ${IMAGE_NAME}:${NEW_TAG}"
+          git push origin "${MANIFEST_BRANCH}"
